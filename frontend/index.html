@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestión Documental - Prototipo</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>Sistema de Gestión Documental</h1>
+    </header>
+
+    <main>
+        <section id="upload-section">
+            <h2>Cargar Nuevo Documento</h2>
+            <form id="upload-form">
+                <p>Seleccione un documento para analizar (PDF, JPG, PNG).</p>
+                <input type="file" id="file-input" name="document" accept=".pdf,.jpg,.jpeg,.png">
+                <button type="submit">Cargar y Procesar</button>
+            </form>
+        </section>
+
+        <section id="search-section">
+            <h2>Buscar Documentos</h2>
+            <form id="search-form">
+                <input type="search" id="search-input" name="query" placeholder="Buscar por contenido...">
+                <button type="submit">Buscar</button>
+            </form>
+            <div id="search-results">
+                <!-- Los resultados de la búsqueda aparecerán aquí -->
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>Prototipo desarrollado como parte de una investigación académica.</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
