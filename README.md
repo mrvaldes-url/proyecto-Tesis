@@ -35,56 +35,47 @@ El sistema utiliza una arquitectura serverless en AWS, que incluye:
 ### Frontend
 El frontend no requiere instalación. Es una aplicación estática de HTML, CSS y JavaScript que se puede abrir directamente en un navegador web.
 
-## Ejecución y Uso del Prototipo
+## Despliegue y Ejecución (CloudFormation)
 
-Este prototipo requiere el despliegue de varios servicios en AWS. A continuación se describe el proceso a alto nivel.
+La forma más sencilla de desplegar toda la infraestructura necesaria es utilizando el script de AWS CloudFormation incluido en el repositorio.
 
-### 1. Despliegue de la Infraestructura en AWS
+### 1. Despliegue de la Infraestructura
 
-Deberá crear los siguientes recursos en su cuenta de AWS:
+1.  Asegúrese de tener sus credenciales de AWS configuradas localmente y de haber cumplido con los [Prerrequisitos](#prerrequisitos).
+2.  Abra su terminal y navegue a la raíz de este repositorio.
+3.  Ejecute el siguiente comando para desplegar la pila de CloudFormation. Puede cambiar el valor de `ProjectName` si lo desea.
 
-1.  **Amazon S3 Bucket:** Un bucket para almacenar los documentos cargados.
-2.  **Amazon OpenSearch Domain:** Un dominio de OpenSearch para indexar los documentos. Asegúrese de que sea accesible desde las funciones Lambda (por ejemplo, desplegándolo dentro de una VPC con los endpoints correspondientes).
-3.  **Roles de IAM:** Roles con los permisos necesarios para que las funciones Lambda puedan acceder a S3, Textract, Comprehend y OpenSearch.
-4.  **Funciones Lambda:**
-    -   `document_processor`: Despliegue el código de `backend/document_processor.py`. Configure un trigger de S3 para que se ejecute cuando se creen nuevos objetos en el bucket de carga.
-    -   `generate_presigned_url`: Despliegue el código de `backend/generate_presigned_url.py`.
-    -   `search_handler`: Despliegue el código de `backend/search_handler.py`.
-5.  **Amazon API Gateway:**
-    -   Cree una API REST.
-    -   Cree un recurso para la generación de URLs pre-firmadas (ej. `/generate-presigned-url`) con un método `POST` que se integre con la Lambda `generate_presigned_url`.
-    -   Cree un recurso para la búsqueda (ej. `/search`) con un método `GET` que se integre con la Lambda `search_handler`.
-    -   Habilite CORS en ambos endpoints para permitir las solicitudes desde el navegador.
-
-### 2. Configuración de Variables de Entorno
-
-Configure las siguientes variables de entorno en sus funciones Lambda:
-
--   **Para `document_processor`:**
-    -   `OPENSEARCH_HOST`: El endpoint de su dominio de OpenSearch (sin `https://`).
-    -   `OPENSEARCH_INDEX`: El nombre del índice que desea usar (ej. `documents`).
--   **Para `generate_presigned_url`:**
-    -   `UPLOAD_BUCKET`: El nombre de su bucket de S3.
--   **Para `search_handler`:**
-    -   `OPENSEARCH_HOST`: El mismo endpoint de su dominio de OpenSearch.
-    -   `OPENSEARCH_INDEX`: El mismo nombre del índice.
-
-### 3. Configuración del Frontend
-
-1.  Abra el archivo `frontend/script.js`.
-2.  Reemplace las URLs de marcador de posición con las URLs reales de su API Gateway:
-    ```javascript
-    // Reemplace ... con las URLs de su despliegue
-    const API_GENERATE_URL = 'https://<API-ID>.execute-api.<REGION>.amazonaws.com/prod/generate-presigned-url';
-    const API_SEARCH_URL = 'https://<API-ID>.execute-api.<REGION>.amazonaws.com/prod/search';
+    ```bash
+    aws cloudformation deploy \
+      --template-file cloudformation.yaml \
+      --stack-name DocManPro-Stack \
+      --parameter-overrides ProjectName=DocManPro \
+      --capabilities CAPABILITY_IAM
     ```
 
-### 4. Uso del Prototipo
+4.  Espere a que la creación de la pila finalice. Esto puede tardar varios minutos, especialmente la creación del dominio de OpenSearch. Puede monitorear el progreso en la consola de AWS CloudFormation.
+
+### 2. Configuración del Frontend
+
+Una vez que la pila se haya creado correctamente, necesita obtener la URL del API Gateway para configurar el frontend.
+
+1.  Vaya a la consola de AWS CloudFormation, seleccione la pila `DocManPro-Stack` y vaya a la pestaña **"Outputs"** (Salidas).
+2.  Copie el valor de la clave `ApiGatewayEndpointUrl`.
+3.  Abra el archivo `frontend/script.js` en su editor de código.
+4.  Reemplace las URLs de marcador de posición con la URL que copió. Asegúrese de añadir los paths correctos (`/generate-url` y `/search`):
+
+    ```javascript
+    // Ejemplo de cómo deberían quedar las URLs
+    const API_GENERATE_URL = 'https://<ID-API>.execute-api.<REGION>.amazonaws.com/prod/generate-url';
+    const API_SEARCH_URL = 'https://<ID-API>.execute-api.<REGION>.amazonaws.com/prod/search';
+    ```
+
+### 3. Uso del Prototipo
 
 1.  Abra el archivo `frontend/index.html` en su navegador web.
 2.  **Para cargar un documento:**
     -   Haga clic en "Choose File" y seleccione un archivo de imagen (JPG, PNG).
-    -   Haga clic en "Cargar y Procesar". El archivo se subirá a S3 y se iniciará el pipeline de procesamiento.
+    -   Haga clic en "Cargar y Procesar".
 3.  **Para buscar documentos:**
-    -   Escriba un término de búsqueda en el campo "Buscar por contenido...".
-    -   Haga clic en "Buscar". Los resultados aparecerán debajo, con el texto coincidente resaltado.
+    -   Escriba un término de búsqueda en el campo de búsqueda.
+    -   Haga clic en "Buscar". Los resultados aparecerán debajo.

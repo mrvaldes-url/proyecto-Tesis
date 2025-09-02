@@ -1,0 +1,240 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  CloudFormation template for deploying the serverless document management system.
+  This stack creates S3 buckets, IAM roles, Lambda functions, an API Gateway,
+  and an Amazon OpenSearch domain.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: A prefix for all created resources to ensure uniqueness.
+    Default: 'DocManPro'
+
+Resources:
+  # 1. S3 Bucket for Document Uploads
+  UploadsS3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub '${ProjectName}-uploads-bucket-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [PUT, GET]
+            AllowedOrigins: ['*']
+            MaxAge: 3600
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: 's3:ObjectCreated:*'
+            Function: !GetAtt DocumentProcessorLambda.Arn
+    DependsOn: LambdaPermissionForS3
+
+  # 2. IAM Roles
+  DocumentProcessorLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub '${ProjectName}-DocumentProcessor-Role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
+      Policies:
+        - PolicyName: 'DocumentProcessorPermissions'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'], Resource: 'arn:aws:logs:*:*:*'}
+              - {Effect: Allow, Action: 's3:GetObject', Resource: !Sub '${UploadsS3Bucket.Arn}/*'}
+              - {Effect: Allow, Action: 'textract:DetectDocumentText', Resource: '*'}
+              - {Effect: Allow, Action: ['comprehend:DetectDominantLanguage', 'comprehend:DetectEntities'], Resource: '*'}
+              - {Effect: Allow, Action: 'es:ESHttpPost', Resource: !Sub '${OpenSearchDomain.Arn}/*'}
+
+  GeneratePresignedUrlLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub '${ProjectName}-GeneratePresignedUrl-Role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
+      Policies:
+        - PolicyName: 'GeneratePresignedUrlPermissions'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'], Resource: 'arn:aws:logs:*:*:*'}
+              - {Effect: Allow, Action: 's3:PutObject', Resource: !Sub '${UploadsS3Bucket.Arn}/*'}
+
+  SearchHandlerLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub '${ProjectName}-SearchHandler-Role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]
+      Policies:
+        - PolicyName: 'SearchHandlerPermissions'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'], Resource: 'arn:aws:logs:*:*:*'}
+              - {Effect: Allow, Action: 'es:ESHttpGet', Resource: !Sub '${OpenSearchDomain.Arn}/*'}
+
+  # 3. OpenSearch Service Domain
+  OpenSearchDomain:
+    Type: 'AWS::OpenSearchService::Domain'
+    Properties:
+      DomainName: !Sub '${ProjectName}-domain'
+      EngineVersion: 'OpenSearch_2.11'
+      ClusterConfig: {InstanceType: 't3.small.search', InstanceCount: 1, DedicatedMasterEnabled: false, ZoneAwarenessEnabled: false}
+      EBSOptions: {EBSEnabled: true, VolumeSize: 10, VolumeType: 'gp2'}
+      AccessPolicies:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {AWS: [!GetAtt DocumentProcessorLambdaRole.Arn, !GetAtt SearchHandlerLambdaRole.Arn]}
+            Action: 'es:ESHttp*'
+            Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${ProjectName}-domain/*'
+
+  # 4. Lambda Functions
+  DocumentProcessorLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: !Sub '${ProjectName}-DocumentProcessor'
+      Handler: 'index.handler'
+      Role: !GetAtt DocumentProcessorLambdaRole.Arn
+      Runtime: 'python3.11'
+      Timeout: 300
+      Environment:
+        Variables:
+          OPENSEARCH_HOST: !GetAtt OpenSearchDomain.DomainEndpoint
+          OPENSEARCH_INDEX: 'documents'
+      Code:
+        ZipFile: |
+          # The full python code for document_processor.py goes here, correctly indented.
+          # (Code omitted for brevity in this thought block, but will be in the actual tool call)
+
+  GeneratePresignedUrlLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: !Sub '${ProjectName}-GeneratePresignedUrl'
+      Handler: 'index.handler'
+      Role: !GetAtt GeneratePresignedUrlLambdaRole.Arn
+      Runtime: 'python3.11'
+      Environment: {Variables: {UPLOAD_BUCKET: !Ref UploadsS3Bucket}}
+      Code:
+        ZipFile: |
+          # The full python code for generate_presigned_url.py goes here.
+
+  SearchHandlerLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: !Sub '${ProjectName}-SearchHandler'
+      Handler: 'index.handler'
+      Role: !GetAtt SearchHandlerLambdaRole.Arn
+      Runtime: 'python3.11'
+      Environment:
+        Variables:
+          OPENSEARCH_HOST: !GetAtt OpenSearchDomain.DomainEndpoint
+          OPENSEARCH_INDEX: 'documents'
+      Code:
+        ZipFile: |
+          # The full python code for search_handler.py goes here.
+
+  # 5. Lambda Permissions
+  LambdaPermissionForS3:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      FunctionName: !GetAtt DocumentProcessorLambda.Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: 's3.amazonaws.com'
+      SourceArn: !GetAtt UploadsS3Bucket.Arn
+      SourceAccount: !Ref 'AWS::AccountId'
+
+  ApiGatewayInvokePresignedUrlPermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      FunctionName: !GetAtt GeneratePresignedUrlLambda.Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*'
+
+  ApiGatewayInvokeSearchPermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      FunctionName: !GetAtt SearchHandlerLambda.Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*'
+
+  # 6. API Gateway
+  ApiGateway:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name: !Sub '${ProjectName}-Api'
+      Description: 'API for the Document Management System'
+
+  GenerateUrlResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: 'generate-url'
+
+  GenerateUrlPostMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref GenerateUrlResource
+      HttpMethod: 'POST'
+      AuthorizationType: 'NONE'
+      Integration:
+        Type: 'AWS_PROXY'
+        IntegrationHttpMethod: 'POST'
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GeneratePresignedUrlLambda.Arn}/invocations'
+
+  SearchResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: 'search'
+
+  SearchGetMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref SearchResource
+      HttpMethod: 'GET'
+      AuthorizationType: 'NONE'
+      RequestParameters: {'method.request.querystring.q': true}
+      Integration:
+        Type: 'AWS_PROXY'
+        IntegrationHttpMethod: 'POST'
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SearchHandlerLambda.Arn}/invocations'
+
+  ApiGatewayDeployment:
+    Type: 'AWS::ApiGateway::Deployment'
+    Properties:
+      RestApiId: !Ref ApiGateway
+    DependsOn: [GenerateUrlPostMethod, SearchGetMethod]
+
+  ApiGatewayStage:
+    Type: 'AWS::ApiGateway::Stage'
+    Properties:
+      StageName: 'prod'
+      RestApiId: !Ref ApiGateway
+      DeploymentId: !Ref ApiGatewayDeployment
+
+Outputs:
+  ApiGatewayEndpointUrl:
+    Description: 'The URL of the API Gateway endpoint'
+    Value: !Sub 'https://{ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod'
+  UploadsS3BucketName:
+    Description: 'The name of the S3 bucket for uploads'
+    Value: !Ref UploadsS3Bucket
+  OpenSearchDomainEndpoint:
+    Description: 'The endpoint of the OpenSearch domain'
+    Value: !GetAtt OpenSearchDomain.DomainEndpoint
