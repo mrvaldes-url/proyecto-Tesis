@@ -31,7 +31,6 @@ Resources:
         LambdaConfigurations:
           - Event: 's3:ObjectCreated:*'
             Function: !GetAtt DocumentProcessorLambda.Arn
-    DependsOn: LambdaPermissionForS3
 
   # 2. IAM Roles
   DocumentProcessorLambdaRole:
