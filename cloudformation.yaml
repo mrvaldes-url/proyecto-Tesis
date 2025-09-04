@@ -123,7 +123,9 @@ Resources:
       Handler: 'index.handler'
       Role: !GetAtt GeneratePresignedUrlLambdaRole.Arn
       Runtime: 'python3.11'
-      Environment: {Variables: {UPLOAD_BUCKET: !Ref UploadsS3Bucket}}
+      Environment:
+        Variables:
+          UPLOAD_BUCKET: !Sub '${ProjectName}-uploads-bucket-${AWS::AccountId}'
       Code:
         ZipFile: |
           # The full python code for generate_presigned_url.py goes here.
